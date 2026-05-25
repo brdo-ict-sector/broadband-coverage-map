@@ -1,0 +1,7 @@
+# Claude Code logs and credentials
+.claude
+claude.log
+
+# OS clutter
+.DS_Store
+Thumbs.db
