@@ -5,3 +5,6 @@ claude.log
 # OS clutter
 .DS_Store
 Thumbs.db
+
+# Raw & prepared source data — large (~9 GB), external, regenerable; never commit
+01_data_sources/

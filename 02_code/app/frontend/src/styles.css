@@ -1,0 +1,138 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+.controls {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 1;
+  width: 280px;
+  max-width: 86vw;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.controls h1 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.filter {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.filter span {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.filter select {
+  width: 100%;
+  padding: 7px 9px;
+  font-size: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.legend-rows {
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  padding-top: 10px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  width: 380px;
+  max-width: 92vw;
+  height: 100%;
+  background: #fff;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.16);
+  overflow-y: auto;
+  padding: 20px 22px;
+}
+
+.panel .close {
+  float: right;
+  border: none;
+  background: none;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.panel h2 {
+  margin: 0 24px 4px 0;
+  font-size: 16px;
+}
+
+.panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.panel td {
+  padding: 4px 6px;
+  border-top: 1px solid #eee;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.panel td.key {
+  color: #666;
+  white-space: nowrap;
+  width: 38%;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 12px;
+}
+.badge.high {
+  background: #1a7f37;
+}
+.badge.medium {
+  background: #bf8700;
+}

@@ -1,0 +1,65 @@
+# The deployable app: lean serving DB + read-only API + Caddy (static frontend,
+# /api proxy, PMTiles). The SAME file runs locally and on the VPS — only .env
+# changes (set SITE_ADDRESS to your domain there for automatic HTTPS).
+name: broadband-app
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: broadband_app_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gis}
+      POSTGRES_DB: ${POSTGRES_DB:-broadband}
+    volumes:
+      - app_pgdata:/var/lib/postgresql/data
+      # Restored ONCE on first init, after the image enables PostGIS. Mounted as
+      # a single file so the image's own initdb scripts are not shadowed.
+      # Run scripts/export_serving_tables.sh first so this file exists.
+      - ./serving-data/serving.sql:/docker-entrypoint-initdb.d/30_serving.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gis} -d ${POSTGRES_DB:-broadband}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    container_name: broadband_app_api
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gis}:${POSTGRES_PASSWORD:-gis}@db:5432/${POSTGRES_DB:-broadband}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"   # exposed for the Vite dev server / direct inspection
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    container_name: broadband_app_web
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./tiles:/srv/tiles:ro          # building PMTiles (built one-time)
+      - caddy_data:/data               # persists Let's Encrypt certs on the VPS
+      - caddy_config:/config
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  app_pgdata:
+  caddy_data:
+  caddy_config:

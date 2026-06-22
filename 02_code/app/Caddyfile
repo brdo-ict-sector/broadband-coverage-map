@@ -1,0 +1,24 @@
+# SITE_ADDRESS is ':80' locally (plain HTTP) and your domain on the VPS, where
+# Caddy then provisions and renews Let's Encrypt certs automatically.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# API — strip the /api prefix so /api/facilities -> /facilities upstream.
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Building PMTiles. file_server honours HTTP range requests, which is how the
+	# pmtiles client reads a single .pmtiles archive without downloading it whole.
+	handle /tiles/* {
+		root * /srv
+		file_server
+	}
+
+	# Static frontend (SPA fallback to index.html).
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

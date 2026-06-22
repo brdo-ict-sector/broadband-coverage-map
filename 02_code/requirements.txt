@@ -1,0 +1,6 @@
+psycopg[binary]>=3.1
+SQLAlchemy>=2.0
+GeoAlchemy2>=0.14
+pandas>=2.1
+openpyxl>=3.1
+python-dotenv>=1.0

@@ -1,0 +1,5 @@
+.env
+serving-data/serving.sql
+tiles/*.pmtiles
+frontend/node_modules/
+frontend/dist/
