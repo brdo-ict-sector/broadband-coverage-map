@@ -29,6 +29,7 @@ docker exec "${ETL_CONTAINER}" pg_dump \
     -U "${ETL_USER}" -d "${ETL_DB}" \
     --no-owner --no-privileges \
     -t facilities \
+    -t facility_payments \
     -t match_facility_building \
     -t community \
     > "${OUT_FILE}"

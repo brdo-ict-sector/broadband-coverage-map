@@ -1,66 +1,37 @@
-import { useEffect, useState } from "react";
-import { fetchFacility, type FacilityDetail } from "./api";
+import { Fragment, useEffect, useState } from "react";
+import { fetchFacility, type FacilityDetail, type Payment } from "./api";
 
 type Props = {
   facilityId: number;
   onClose: () => void;
 };
 
-// The NSZU schema is whatever the source xlsx had, so we render generically but
-// tuned: surface the useful fields first and hide internal IDs / code columns
-// (and lat/lng, which the map already conveys).
-const PRIORITY = [
-  "division_name",
-  "division_type",
-  "legal_entity_name",
-  "care_type",
-  "property_type",
-  "residence_region",
-  "residence_settlement",
-  "address",
-  "division_phone",
-  "legal_entity_phone",
-  "legal_entity_website",
-  "email",
+// Card layout agreed 2026-07-17: fixed field list with Ukrainian labels.
+const FACILITY_FIELDS: [string, string][] = [
+  ["domain_type", "Галузь"],
+  ["specific_type", "Тип"],
+  ["name", "Назва"],
+  ["edrpou", "ЄДРПОУ"],
+  ["oblast", "Область"],
+  ["hromada", "Громада"],
+  ["settlement", "Населений пункт"],
+  ["str_address", "Адреса"],
+  ["id_source", "Ідентифікатор закладу"],
+  ["edra_id", "Ідентифікатор будівлі"],
+  ["katottg_4", "КАТОТТГ"],
 ];
-const HIDE = new Set([
-  "legal_entity_id",
-  "division_id",
-  "edr_role",
-  "edr_founders",
-  "spromozhna_merezha_role",
-  "registration_settlement_koatuu",
-  "registration_gromada_koatuu",
-  "residence_gromada_koatuu",
-  "residence_settlement_koatuu",
-  "location",
-  "lat",
-  "lng",
-]);
 
-// Friendlier labels for the few keys worth renaming; others fall back to the
-// de-underscored column name.
-const LABELS: Record<string, string> = {
-  legal_entity_name: "Юридична особа",
-  legal_entity_edrpou: "ЄДРПОУ",
-  legal_entity_phone: "Телефон (ЮО)",
-  legal_entity_website: "Сайт",
-  division_type: "Тип підрозділу",
-  division_phone: "Телефон",
-  care_type: "Тип допомоги",
-  property_type: "Форма власності",
-  residence_region: "Область",
-  residence_settlement: "Населений пункт",
-  address: "Адреса",
-  confidence: "Достовірність",
-  distance_m: "Відстань, м",
-  build_id: "BUILD_ID",
-  katottg: "КАТОТТГ",
+const PAYMENT_ROWS: [keyof Payment, string][] = [
+  ["payer_name", "Платник"],
+  ["trans_date", "Дата платежу"],
+  ["recipt_edrpou", "ЄДРПОУ надавача"],
+  ["currency", "Валюта"],
+];
+
+const CONFIDENCE_LABEL: Record<string, string> = {
+  high: "Точка в межах будівлі",
+  medium: "≤ 100 м від центру будівлі",
 };
-
-function pretty(key: string): string {
-  return LABELS[key] ?? key.replace(/_/g, " ");
-}
 
 export default function DetailPanel({ facilityId, onClose }: Props) {
   const [data, setData] = useState<FacilityDetail | null>(null);
@@ -78,53 +49,112 @@ export default function DetailPanel({ facilityId, onClose }: Props) {
     };
   }, [facilityId]);
 
-  const entries = data
-    ? Object.entries(data).filter(
-        ([k, v]) =>
-          v != null && v !== "" && k !== "facility_id" && !HIDE.has(k)
-      )
-    : [];
-  entries.sort((a, b) => {
-    const ia = PRIORITY.indexOf(a[0]);
-    const ib = PRIORITY.indexOf(b[0]);
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-  });
+  // Esc dismisses the panel (design handoff).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
-  const confidence = data?.confidence as string | undefined;
+  const fieldValue = (key: string): string | null => {
+    if (!data) return null;
+    // The source edra_id column is empty for now; the spatially matched
+    // building id (build_id) stands in for it.
+    const v = key === "edra_id" ? data.edra_id ?? data.build_id : data[key];
+    return v == null || v === "" ? null : String(v);
+  };
+
+  const confidence = (data?.confidence ?? null) as string | null;
+  const payments = data?.payments ?? [];
 
   return (
     <aside className="panel">
-      <button className="close" onClick={onClose} aria-label="Закрити">
-        ×
-      </button>
-      {error && <p>Не вдалося завантажити: {error}</p>}
-      {!data && !error && <p>Завантаження…</p>}
-      {data && (
-        <>
-          <h2>
-            {String(
-              data.division_name ??
-                data.legal_entity_name ??
-                `Заклад #${facilityId}`
-            )}
-          </h2>
-          {confidence && (
-            <p>
-              <span className={`badge ${confidence}`}>{confidence}</span>
-            </p>
+      <div className="panel-head">
+        <div style={{ flex: 1 }}>
+          {data && (
+            <span className={`badge ${confidence ?? "none"}`}>
+              {confidence
+                ? CONFIDENCE_LABEL[confidence] ?? confidence
+                : "Без прив'язки до будівлі"}
+            </span>
           )}
-          <table>
-            <tbody>
-              {entries.map(([k, v]) => (
-                <tr key={k}>
-                  <td className="key">{pretty(k)}</td>
-                  <td>{String(v)}</td>
-                </tr>
+          <h2>
+            {data
+              ? String(data.name ?? `Заклад #${facilityId}`)
+              : "Завантаження…"}
+          </h2>
+        </div>
+        <button className="panel-close" onClick={onClose} aria-label="Закрити">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="panel-body">
+        {error && <p>Не вдалося завантажити: {error}</p>}
+        {data && (
+          <>
+            <h3>Інформація про заклад</h3>
+            <dl className="detail-grid">
+              {FACILITY_FIELDS.map(([key, label]) => {
+                const v = fieldValue(key);
+                return v == null ? null : (
+                  <Fragment key={key}>
+                    <dt>{label}</dt>
+                    <dd>{v}</dd>
+                  </Fragment>
+                );
+              })}
+            </dl>
+
+            <h3 className="payments-title">
+              Оплачений доступ до Інтернету{" "}
+              {payments.length > 0 && (
+                <span className="count">· {payments.length}</span>
+              )}
+            </h3>
+            {payments.length === 0 && (
+              <p className="muted">Немає даних про оплату.</p>
+            )}
+            <div className="payments">
+              {payments.map((p, i) => (
+                <div className="payment" key={i}>
+                  <div className="payment-head">
+                    <div className="payment-provider">
+                      {p.recipt_name ?? p.recipt_edrpou ?? "Провайдер"}
+                    </div>
+                    {p.amount != null && (
+                      <div className="payment-sum">{p.amount}</div>
+                    )}
+                  </div>
+                  <div className="payment-grid">
+                    {PAYMENT_ROWS.map(([key, label]) =>
+                      p[key] == null || p[key] === "" ? null : (
+                        <div key={key}>
+                          <div className="k">{label}</div>
+                          <div className="v">{String(p[key])}</div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </>
-      )}
+            </div>
+          </>
+        )}
+      </div>
     </aside>
   );
 }

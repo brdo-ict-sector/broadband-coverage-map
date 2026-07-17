@@ -58,17 +58,21 @@ SHAPEFILE_LAYERS = {
     "2026_05_25_street_MultiLineString.shp": "street_multilinestring",
 }
 
-# --- social establishments (NSZU; MVP = hospitals) ---------------------------
-FACILITIES_XLSX = PREP_DIR / "nszu - 2026-05-01.xlsx"
+# --- social establishments (facility + internet-spending catalog) ------------
+FACILITIES_XLSX = PREP_DIR / "social_facilities_spending - 2026-07-16.xlsx"
 FACILITIES_TABLE = "facilities"
-FACILITIES_LAT_COL = "lat"
-FACILITIES_LNG_COL = "lng"
+PAYMENTS_TABLE = "facility_payments"
+FACILITIES_LAT_COL = "coord_lat_y"
+FACILITIES_LNG_COL = "coord_long_x"
+# Sanity bbox: rows whose point falls outside Ukraine (swapped/garbage coords)
+# are dropped at ingestion, they would render in the wrong country.
+UKRAINE_BBOX = (22.0, 44.0, 40.5, 52.5)  # minLng, minLat, maxLng, maxLat
 
 # --- matching ----------------------------------------------------------------
 BUILDINGS_MATCH_TABLE = "build_polygon"   # primary target (addressed footprints)
 MATCH_OUTPUT_TABLE = "match_facility_building"
-# MVP accepts only 'high' (point contained by a building) and 'medium' (nearest
-# building <= 25 m). The looser 25-50 m 'low' band is excluded, so the accept
-# cap is 25 m. Widen NEAREST_THRESHOLD_M later for diagnostics on the unmatched.
-NEAREST_THRESHOLD_M = 25   # max distance (m) for an accepted nearest match
-HIGH_CONF_NEAREST_M = 25   # nearest within this => 'medium' (equals the cap for MVP)
+# A facility gets a building_id when its point is contained by a footprint
+# ('high') or when the nearest footprint CENTROID is within
+# CENTROID_THRESHOLD_M ('medium'). Decision 2026-07-17: 100 m from the centre
+# of the building polygon.
+CENTROID_THRESHOLD_M = 100

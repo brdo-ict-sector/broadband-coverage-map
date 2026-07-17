@@ -28,6 +28,3 @@ CORS_ORIGINS = [
 ]
 
 SRID = 4326
-
-# MVP shows only accepted matches (see roadmap Phase 1).
-ACCEPTED_CONFIDENCE = ("high", "medium")

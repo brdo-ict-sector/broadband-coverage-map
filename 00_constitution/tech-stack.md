@@ -1,6 +1,6 @@
 # Tech Stack — Broadband Coverage Map of Ukraine
 
-> Status: Draft v1 · Last updated: 2026-06-22
+> Status: Draft v2 · Last updated: 2026-07-17
 
 ## Purpose
 
@@ -18,7 +18,9 @@ These numbers anchor the decisions below:
 
 - **Concurrent users:** up to ~1,000.
 - **Social establishments (full scope):** up to ~80,000.
-- **MVP scope:** hospitals only (~12,800 NSZU facility divisions).
+- **Current scope:** the 4-domain social-facilities catalog (64,864 rows;
+  17,827 unique facilities with coordinates mapped so far) + internet-access
+  spending records.
 - **Building footprints:** ~9.9M addressed polygons (+3.3M Microsoft footprints,
   ~785k points), all WGS84 / EPSG:4326.
 
@@ -53,12 +55,13 @@ These numbers anchor the decisions below:
 
 **As built (MVP, running locally — see `02_code/app/` + README):** the runtime is
 split from the ETL. The heavy ~6 GB ETL/PostGIS DB stays offline on the
-workstation; only three small tables (`facilities`, `match_facility_building`,
-`community`) are exported into a **lean serving DB** that the app carries. The app
-is `docker compose`: serving Postgres+PostGIS · FastAPI · **Caddy** (static
-frontend + `/api` reverse-proxy + `/tiles`). The same compose runs locally and on
-the VPS. Building PMTiles are static files served by Caddy (CDN deferred). See
-§7. The frontend currently uses plain MapLibre (deck.gl reserved — see §6).
+workstation; only four small tables (`facilities`, `facility_payments`,
+`match_facility_building`, `community`) are exported into a **lean serving DB**
+that the app carries. The app is `docker compose`: serving Postgres+PostGIS ·
+FastAPI · **Caddy** (static frontend + `/api` reverse-proxy + `/tiles`). The same
+compose runs locally and on the VPS. Building PMTiles are static files served by
+Caddy (CDN deferred). See §7. The frontend currently uses plain MapLibre
+(deck.gl reserved — see §6).
 
 ## Decisions
 
@@ -131,12 +134,16 @@ Rationale:
 - **Martin is the documented upgrade path**, not an omission. It earns its
   operational complexity only when a layer must be both large *and* live.
 
-**As built (MVP):** facilities ship as a single `/facilities` GeoJSON (7,100
-points, ~1.3 MB) drawn as **small unclustered dots** — a product decision so the
-country-wide distribution is legible at a glance (clustering hid it). Each point
-is tagged server-side with its `community_id` via `ST_Contains`, enabling the
-instant client-side community filter. Building PMTiles are built but **not yet
-wired into the map**; Caddy serves them from the VPS (CDN deferred).
+**As built (MVP):** facilities ship as a single `/facilities` GeoJSON (17,827
+points, ~5.9 MB raw / ~1 MB gzipped) drawn as **small unclustered dots** — a
+product decision so the country-wide distribution is legible at a glance
+(clustering hid it). Each feature carries the attributes the client filters on
+(domain / oblast / hromada / settlement / edrpou / confidence / providers), so
+all filtering, counters, and the top-providers chart are instant and
+client-side. Building PMTiles are built but **not yet wired into the map**;
+Caddy serves them from the VPS (CDN deferred). (The earlier `ST_Contains`
+community attribution + borders overlay was replaced by these attribute
+filters; `/communities` remains available.)
 
 > ⚠️ **Scaling watch:** an 80k-point GeoJSON (~10–40 MB) is too heavy for a
 > single browser source. The facilities layer **must** move to vector tiles
@@ -172,10 +179,11 @@ and ports without code changes.
 
 - **Lean serving DB.** The VPS never carries the ~6 GB ETL database. A script
   (`scripts/export_serving_tables.sh`) `pg_dump`s only `facilities`,
-  `match_facility_building`, `community` (~72 MB) into a dump the app's PostGIS
-  container restores on first init. The API is read-only over this. Keeps the box
-  at the **lean target (2 vCPU / 4 GB / 40 GB)** and means no request ever queries
-  the 9.9M-row building layer — buildings are static PMTiles.
+  `facility_payments`, `match_facility_building`, `community` (~63 MB) into a
+  dump the app's PostGIS container restores on first init. The API is read-only
+  over this. Keeps the box at the **lean target (2 vCPU / 4 GB / 40 GB)** and
+  means no request ever queries the 9.9M-row building layer — buildings are
+  static PMTiles.
 - **Caddy reverse proxy.** Serves the static frontend, proxies `/api` to FastAPI,
   serves `/tiles` (PMTiles via HTTP range). `SITE_ADDRESS=:80` locally, a domain
   on the VPS → **automatic HTTPS** (Let's Encrypt), certs persisted in a volume.

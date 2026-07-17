@@ -98,8 +98,61 @@ def ingest_shapefiles() -> None:
             print(f"   - {fname}: {'; '.join(problems)}")
 
 
+# One source row = one facility observation, possibly with internet-access
+# payments attached. Facilities can repeat (one row per payment), and a single
+# payment cell can aggregate SEVERAL providers as '; '-joined lists
+# (recipt_edrpou / recipt_name / amount align segment by segment). The load
+# splits the sheet into a deduplicated facilities table and an exploded
+# one-row-per-provider payments table keyed by facility_id.
+PAYMENT_COLS = [
+    "payer_name", "trans_date", "currency",
+    "recipt_edrpou", "recipt_name", "amount",
+]
+FACILITY_KEY_COLS = ["name", "edrpou", "settlement", "str_address"]
+
+
+def _split_multi(value) -> list[str]:
+    if pd.isna(value):
+        return []
+    return [s.strip() for s in str(value).split(";") if s.strip()]
+
+
+def _pick(parts: list[str], i: int, n: int, raw):
+    """Segment i of an n-provider cell: aligned lists give one value per
+    segment, a single value applies to all, anything else (unaligned — happens
+    for trans_date) is kept verbatim on every exploded row."""
+    if not parts:
+        return None
+    if len(parts) == n:
+        return parts[i]
+    if len(parts) == 1:
+        return parts[0]
+    return str(raw)
+
+
+def _explode_payments(src: pd.DataFrame, facility_ids: "pd.Series") -> pd.DataFrame:
+    rows = []
+    for idx, rec in src.iterrows():
+        edrpous = _split_multi(rec["recipt_edrpou"])
+        names = _split_multi(rec["recipt_name"])
+        amounts = _split_multi(rec["amount"])
+        dates = _split_multi(rec["trans_date"])
+        n = max(len(edrpous), 1)
+        for i in range(n):
+            rows.append({
+                "facility_id": facility_ids[idx],
+                "payer_name": None if pd.isna(rec["payer_name"]) else rec["payer_name"],
+                "trans_date": _pick(dates, i, n, rec["trans_date"]),
+                "currency": None if pd.isna(rec["currency"]) else rec["currency"],
+                "recipt_edrpou": _pick(edrpous, i, n, rec["recipt_edrpou"]),
+                "recipt_name": _pick(names, i, n, rec["recipt_name"]),
+                "amount": _pick(amounts, i, n, rec["amount"]),
+            })
+    return pd.DataFrame(rows)
+
+
 def ingest_facilities() -> None:
-    print("\n== Facilities (NSZU) ==")
+    print("\n== Facilities (social facilities + internet spending) ==")
     df = pd.read_excel(config.FACILITIES_XLSX, dtype=str)
     df.columns = [c.strip().lower() for c in df.columns]
 
@@ -109,13 +162,36 @@ def ingest_facilities() -> None:
 
     before = len(df)
     df = df.dropna(subset=[lat, lng])
-    print(f"  {len(df)}/{before} rows have valid coordinates")
+    print(f"  {len(df)}/{before} rows have coordinates")
+
+    minx, miny, maxx, maxy = config.UKRAINE_BBOX
+    in_ua = df[lng].between(minx, maxx) & df[lat].between(miny, maxy)
+    if (~in_ua).any():
+        print(f"  dropping {(~in_ua).sum()} row(s) with coordinates outside Ukraine")
+        df = df[in_ua]
+
+    # Deduplicate: one facility row per key, payments split off separately.
+    key = df[FACILITY_KEY_COLS].fillna("").agg("|".join, axis=1)
+    fac = (
+        df.loc[~key.duplicated()]
+        .drop(columns=PAYMENT_COLS)
+        .reset_index(drop=True)
+    )
+    key_to_id = {k: i for i, k in enumerate(key.loc[~key.duplicated()])}
+
+    pay_src = df.loc[df[PAYMENT_COLS].notna().any(axis=1), PAYMENT_COLS]
+    pay = _explode_payments(pay_src, key.loc[pay_src.index].map(key_to_id))
+    print(
+        f"  {len(fac)} unique facilities, {len(pay_src)} payment rows "
+        f"-> {len(pay)} per-provider payment records"
+    )
 
     eng = engine()
-    df.to_sql(
+    fac.to_sql(
         config.FACILITIES_TABLE, eng,
         if_exists="replace", index=True, index_label="facility_id",
     )
+    pay.to_sql(config.PAYMENTS_TABLE, eng, if_exists="replace", index=False)
     with eng.begin() as conn:
         conn.execute(text(
             f"ALTER TABLE {config.FACILITIES_TABLE} "
@@ -129,7 +205,14 @@ def ingest_facilities() -> None:
             f"CREATE INDEX IF NOT EXISTS {config.FACILITIES_TABLE}_geom_idx "
             f"ON {config.FACILITIES_TABLE} USING GIST (geom);"
         ))
-    print(f"  loaded -> {config.FACILITIES_TABLE} (+ geom, GIST index)")
+        conn.execute(text(
+            f"CREATE INDEX IF NOT EXISTS {config.PAYMENTS_TABLE}_facility_idx "
+            f"ON {config.PAYMENTS_TABLE} (facility_id);"
+        ))
+    print(
+        f"  loaded -> {config.FACILITIES_TABLE} (+ geom, GIST index), "
+        f"{config.PAYMENTS_TABLE}"
+    )
 
 
 def analyze_tables() -> None:

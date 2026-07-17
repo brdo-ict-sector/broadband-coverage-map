@@ -1,46 +1,64 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { basemap } from "./basemap";
+import type { FacilityCollection } from "./api";
 
-// Confidence colours (match the legend in App).
-const HIGH = "#16a34a";
-const MEDIUM = "#f59e0b";
-const ACCENT = "#2563eb";
+// Match-confidence colours: Teal · Vermillion · Slate (mirrored by the
+// sidebar legend / CSS custom props).
+const HIGH = "#0E9E73";
+const MEDIUM = "#E8590C";
+const UNMATCHED = "#5A6472";
+
+const COLOR_BY_CONFIDENCE: maplibregl.ExpressionSpecification = [
+  "match", ["get", "confidence"],
+  "high", HIGH, "medium", MEDIUM, UNMATCHED,
+];
 
 type Props = {
+  data: FacilityCollection;
+  fitKey: string;
+  hasActiveFilter: boolean;
+  selectedId: number | null;
   onSelect: (id: number) => void;
-  communities: GeoJSON.FeatureCollection | null;
-  communityId: number | null;
 };
 
 // Lock the viewport to Ukraine: maxBounds stops panning away, minZoom stops
-// zooming out to the rest of the world.
+// zooming out to the rest of the world. MAX_BOUNDS is padded past the country
+// bounds so fitBounds(UKRAINE_BOUNDS) can fully fit Ukraine (with padding)
+// into any box aspect without being clamped mid-animation.
 const UKRAINE_BOUNDS: maplibregl.LngLatBoundsLike = [
   [21.0, 43.5],
   [41.5, 53.2],
 ];
-const CENTER: [number, number] = [31.2, 48.5];
+const MAX_BOUNDS: maplibregl.LngLatBoundsLike = [
+  [18.5, 42.5],
+  [44.0, 54.2],
+];
+const FIT_PADDING = 24;
 
-// Bounding box of any Polygon/MultiPolygon geometry, for fitBounds().
-function geomBounds(geom: GeoJSON.Geometry): maplibregl.LngLatBounds {
-  const b = new maplibregl.LngLatBounds();
-  const walk = (coords: unknown): void => {
-    if (Array.isArray(coords) && typeof coords[0] === "number") {
-      b.extend(coords as [number, number]);
-    } else if (Array.isArray(coords)) {
-      coords.forEach(walk);
-    }
-  };
-  if ("coordinates" in geom) walk((geom as { coordinates: unknown }).coordinates);
-  return b;
-}
+const EMPTY: GeoJSON.FeatureCollection = {
+  type: "FeatureCollection",
+  features: [],
+};
 
-export default function MapView({ onSelect, communities, communityId }: Props) {
+const NO_SELECTION: maplibregl.FilterSpecification = [
+  "==", ["get", "facility_id"], -1,
+];
+
+export default function MapView({
+  data,
+  fitKey,
+  hasActiveFilter,
+  selectedId,
+  onSelect,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   // --- create the map once -------------------------------------------------
   useEffect(() => {
@@ -48,20 +66,40 @@ export default function MapView({ onSelect, communities, communityId }: Props) {
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: basemap,
-      center: CENTER,
-      zoom: 5.4,
-      minZoom: 4.8,
+      bounds: UKRAINE_BOUNDS,
+      fitBoundsOptions: { padding: FIT_PADDING },
+      minZoom: 4.5,
       maxZoom: 18,
-      maxBounds: UKRAINE_BOUNDS,
+      maxBounds: MAX_BOUNDS,
       attributionControl: { compact: true },
     });
     mapRef.current = map;
+    // Debug/E2E hook: lets tooling reach the map instance (querySourceFeatures).
+    (window as unknown as { __map?: maplibregl.Map }).__map = map;
     map.addControl(new maplibregl.NavigationControl(), "bottom-right");
 
     map.on("load", () => {
-      // Facilities: every accepted point as a small dot (no clustering) so the
-      // spatial distribution is visible from the country view.
-      map.addSource("facilities", { type: "geojson", data: "/api/facilities" });
+      // Facilities: every point as a small dot (no clustering) so the spatial
+      // distribution is visible from the country view.
+      map.addSource("facilities", { type: "geojson", data: EMPTY });
+
+      // Selection halo UNDER the dots: a soft colour-matched ring around the
+      // clicked facility (design handoff: "enlarged + soft ring").
+      map.addLayer({
+        id: "facility-selected-halo",
+        type: "circle",
+        source: "facilities",
+        filter: NO_SELECTION,
+        paint: {
+          "circle-radius": [
+            "interpolate", ["linear"], ["zoom"],
+            5, 9, 10, 13, 16, 18,
+          ],
+          "circle-color": COLOR_BY_CONFIDENCE,
+          "circle-opacity": 0.25,
+        },
+      });
+
       map.addLayer({
         id: "facility-point",
         type: "circle",
@@ -71,15 +109,29 @@ export default function MapView({ onSelect, communities, communityId }: Props) {
             "interpolate", ["linear"], ["zoom"],
             5, 2.2, 8, 3.5, 12, 5.5, 16, 8,
           ],
-          "circle-color": [
-            "match", ["get", "confidence"],
-            "high", HIGH, "medium", MEDIUM, "#888",
-          ],
-          "circle-opacity": 0.82,
+          "circle-color": COLOR_BY_CONFIDENCE,
+          "circle-opacity": 0.85,
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": [
-            "interpolate", ["linear"], ["zoom"], 5, 0.3, 10, 1,
+            "interpolate", ["linear"], ["zoom"], 5, 0.4, 10, 1.5,
           ],
+        },
+      });
+
+      // Selected dot on top, enlarged.
+      map.addLayer({
+        id: "facility-selected",
+        type: "circle",
+        source: "facilities",
+        filter: NO_SELECTION,
+        paint: {
+          "circle-radius": [
+            "interpolate", ["linear"], ["zoom"],
+            5, 5, 10, 7.5, 16, 11,
+          ],
+          "circle-color": COLOR_BY_CONFIDENCE,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
         },
       });
 
@@ -103,87 +155,45 @@ export default function MapView({ onSelect, communities, communityId }: Props) {
     };
   }, []);
 
-  // --- add community borders once the data arrives -------------------------
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !ready || !communities) return;
-    if (map.getSource("communities")) return; // already added
-
-    map.addSource("communities", { type: "geojson", data: communities });
-
-    // Keep all border/highlight layers BENEATH the dots (beforeId).
-    map.addLayer(
-      {
-        id: "community-border",
-        type: "line",
-        source: "communities",
-        paint: {
-          "line-color": "#64748b",
-          "line-opacity": 0.3,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.4, 10, 1],
-        },
-      },
-      "facility-point"
-    );
-    map.addLayer(
-      {
-        id: "community-selected-fill",
-        type: "fill",
-        source: "communities",
-        filter: ["==", ["get", "id"], -1],
-        paint: { "fill-color": ACCENT, "fill-opacity": 0.07 },
-      },
-      "facility-point"
-    );
-    map.addLayer(
-      {
-        id: "community-selected-line",
-        type: "line",
-        source: "communities",
-        filter: ["==", ["get", "id"], -1],
-        paint: { "line-color": ACCENT, "line-width": 2.5, "line-opacity": 0.9 },
-      },
-      "facility-point"
-    );
-  }, [ready, communities]);
-
-  // --- react to the selected community ------------------------------------
+  // --- push the (filtered) facilities into the source ----------------------
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    const src = map.getSource("facilities") as maplibregl.GeoJSONSource;
+    src?.setData(data as GeoJSON.FeatureCollection);
+  }, [ready, data]);
 
-    // Filter the dots to the selected community (or show all).
-    if (map.getLayer("facility-point")) {
-      map.setFilter(
-        "facility-point",
-        communityId == null
-          ? null
-          : ["==", ["get", "community_id"], communityId]
-      );
-    }
-    // Highlight the selected border.
-    const hl: maplibregl.FilterSpecification =
-      communityId == null
-        ? ["==", ["get", "id"], -1]
-        : ["==", ["get", "id"], communityId];
-    if (map.getLayer("community-selected-fill"))
-      map.setFilter("community-selected-fill", hl);
-    if (map.getLayer("community-selected-line"))
-      map.setFilter("community-selected-line", hl);
+  // --- highlight the selected facility -------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const filter: maplibregl.FilterSpecification =
+      selectedId == null
+        ? NO_SELECTION
+        : ["==", ["get", "facility_id"], selectedId];
+    map.setFilter("facility-selected-halo", filter);
+    map.setFilter("facility-selected", filter);
+  }, [ready, selectedId]);
 
-    // Zoom to the selection (or back out to the whole country).
-    if (communityId == null) {
-      map.fitBounds(UKRAINE_BOUNDS, { padding: 20, duration: 600 });
+  // --- refit the viewport when the filter combination changes --------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!hasActiveFilter) {
+      map.fitBounds(UKRAINE_BOUNDS, { padding: FIT_PADDING, duration: 600 });
       return;
     }
-    const feat = communities?.features.find(
-      (f) => (f.properties?.id as number) === communityId
-    );
-    if (feat?.geometry) {
-      const b = geomBounds(feat.geometry);
-      if (!b.isEmpty()) map.fitBounds(b, { padding: 60, duration: 700, maxZoom: 12 });
+    const features = dataRef.current.features;
+    if (features.length === 0) return;
+    const b = new maplibregl.LngLatBounds();
+    for (const f of features) {
+      b.extend(f.geometry.coordinates as [number, number]);
     }
-  }, [ready, communityId, communities]);
+    if (!b.isEmpty()) {
+      map.fitBounds(b, { padding: 60, duration: 700, maxZoom: 13 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, fitKey, hasActiveFilter]);
 
-  return <div id="map" ref={containerRef} />;
+  return <div className="map" ref={containerRef} />;
 }

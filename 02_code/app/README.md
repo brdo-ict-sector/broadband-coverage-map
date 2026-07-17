@@ -5,8 +5,9 @@ a Caddy front end (static React map + `/api` proxy + building PMTiles). The same
 `docker compose` stack runs on your laptop and on the VPS — only `.env` changes.
 
 This is separate from the ETL pipeline in `../` (the heavy 6 GB building DB). The
-app never carries that: buildings are static PMTiles and the API only reads three
-small tables (`facilities`, `match_facility_building`, `community`).
+app never carries that: buildings are static PMTiles and the API only reads four
+small tables (`facilities`, `facility_payments`, `match_facility_building`,
+`community`).
 
 ```
 app/
@@ -58,9 +59,9 @@ npm run dev                                  # http://localhost:5173, proxies /a
 | Method | Path                  | Purpose                                            |
 | ------ | --------------------- | -------------------------------------------------- |
 | GET    | `/health`             | liveness + DB reachability                         |
-| GET    | `/facilities`         | accepted (high+medium) matches as GeoJSON; `?bbox=minLng,minLat,maxLng,maxLat` |
-| GET    | `/facilities/{id}`    | full NSZU record + match metadata (detail panel)   |
-| GET    | `/communities`        | community boundaries (simplified) as GeoJSON       |
+| GET    | `/facilities`         | ALL facilities with coordinates as GeoJSON (filter attributes + providers per feature); `?bbox=minLng,minLat,maxLng,maxLat` |
+| GET    | `/facilities/{id}`    | full facility record + match metadata + internet-access payments (detail card) |
+| GET    | `/communities`        | community boundaries (simplified) as GeoJSON — currently unused by the frontend |
 
 ## Deploy to the VPS
 
@@ -100,6 +101,18 @@ git pull && docker compose up -d --build
 bash scripts/build_building_tiles.sh         # -> app/tiles/buildings.pmtiles
 ```
 
-Caddy serves it at `/tiles/buildings.pmtiles`. The map currently uses an OSM
-raster basemap; wiring the PMTiles layer into `frontend/src/MapView.tsx` (via the
-`pmtiles://` protocol) is the next step to render our own footprints.
+Caddy serves it at `/tiles/buildings.pmtiles`. The map currently uses the CARTO
+Positron basemap; wiring the PMTiles layer into `frontend/src/MapView.tsx` (via
+the `pmtiles://` protocol) is the next step to render our own footprints.
+
+## Frontend notes
+
+- Design source of truth: `../../03_design_references/` (BRDO-branded Claude
+  Design mockup + token handoff). Tokens live as CSS custom properties in
+  `frontend/src/styles.css`; the UI font is Manrope (Google Fonts).
+- All filtering (область → громада → населений пункт cascade, галузь, ЄДРПОУ
+  searches), the counters, the top-20 providers chart, and the CSV export run
+  client-side over the single `/facilities` FeatureCollection.
+- Point colours = match confidence: teal `#0E9E73` (in building), vermillion
+  `#E8590C` (centroid ≤ 100 m), slate `#5A6472` (no match).
+- `window.__map` exposes the MapLibre instance for E2E/debug tooling.

@@ -1,25 +1,32 @@
 # Roadmap — Broadband Coverage Map of Ukraine
 
-> Status: Draft v1 · Last updated: 2026-06-22
+> Status: Draft v2 · Last updated: 2026-07-17
 
 ## Status at a glance
 
 | Phase | State |
 | --- | --- |
 | 0 — Foundations & data ingestion | ✅ Done (city/street layers deferred) |
-| 1 — MVP matching (establishments → buildings) | ✅ Done (7,100 / 12,788 accepted; unmatched analysis ongoing) |
-| 2 — MVP map | 🟨 **Built & running locally**, deployable to VPS; remaining: building PMTiles wired into the map + actual VPS deploy |
-| 3 — Coverage data model | ⬜ Not started |
-| 4 — Full ~80k catalog | ⬜ Not started |
+| 1 — MVP matching (establishments → buildings) | ✅ Done — re-run on the new catalog: 12,533 / 17,827 (70.3%) matched with the 100 m-centroid rule |
+| 2 — MVP map | 🟨 **Built & running locally** (BRDO design, filters, spending/providers analytics); remaining: building PMTiles wired into the map + actual VPS deploy |
+| 3 — Coverage data model | ⬜ Not started (internet-spending payments are a first slice, already in the app) |
+| 4 — Full ~80k catalog | 🟨 Started — catalog switched from NSZU-only to the 4-domain social-facilities list (64,864 rows; 17,945 with coordinates so far) |
 | 5 — Audience workflows & launch | ⬜ Not started |
 
 ## How to read this
 
 Phases are sequenced by dependency, not fixed dates. Each phase lists its
 **goal**, **deliverables**, and **exit criteria** (what must be true to move on).
-The MVP is **hospitals only**; the catalog later grows to ~80,000 social
-establishments. Technology choices are fixed in `tech-stack.md`; the long-term
-vision and audiences are in `mission.md`.
+Technology choices are fixed in `tech-stack.md`; the long-term vision and
+audiences are in `mission.md`.
+
+**Data source (since 2026-07-17):** the catalog is
+`01_data_sources/01_prep_data/social_facilities_spending - 2026-07-16.xlsx` —
+social facilities across four domains (медицина, освіта, культура,
+адміністративні послуги) joined with public-spending records for internet
+access (payer, provider ЄДРПОУ/name, amount, date). Only rows with coordinates
+are mapped (currently медицина + адмінпослуги; освіта/культура lack
+coordinates in the source). It replaces the NSZU-only hospital list.
 
 The near-term north star is the project's stated **step 1**: attribute (match)
 the social-establishment list to building points/polygons.
@@ -47,27 +54,29 @@ the social-establishment list to building points/polygons.
 
 ## Phase 1 — MVP matching: establishments → buildings *(step 1)*  ✅ done
 
-**Goal:** attribute each hospital to its building footprint/point with a
+**Goal:** attribute each facility to its building footprint/point with a
 confidence flag. This is the core of the MVP.
 
 **Deliverables**
 - Matching pipeline (Python + PostGIS):
   - Primary: point-in-polygon of facility `lat/lng` against addressed building
     polygons → `high`.
-  - Fallback: nearest building within the accept cap (25 m for the MVP) →
+  - Fallback: nearest building whose polygon **centroid is within 100 m**
+    (decision 2026-07-17; replaced the earlier 25 m edge-distance cap) →
     `medium`.
   - Output: one row per facility with `BUILD_ID`, `KATOTTG`, matched address,
-    match distance, and a **confidence flag**.
-  - **MVP acceptance: only `high` + `medium` matches are used.** First run:
-    7,100 / 12,788 with valid coordinates (55.5%) accepted.
+    centroid distance, and a **confidence flag**.
+  - Current run (new catalog): **12,533 / 17,827 (70.3%)** — 3,888 contained +
+    8,645 centroid ≤ 100 m. Unmatched facilities are still shown on the map,
+    flagged "без прив'язки".
 - Secondary cross-check (optional): address/house-number comparison
   (`ADDR_NUM` / `MS_ID`). Not required — coordinates alone resolve the match;
   this only adds confidence where a KOATUU↔KATOTTG link happens to be available.
 - A match-quality report (matched / nearest-fallback / unmatched counts).
 
 **Exit criteria**
-- Hospital list matched to buildings using `high` + `medium` only (achieved:
-  55.5% on the first run).
+- Facility list matched to buildings with `high` + `medium` confidence
+  (achieved: 70.3% on the current catalog).
 - Unmatched cases investigated (rural / no footprint / approximate coordinates)
   and improvement options assessed — e.g. `build_multipolygon` fallback.
 
@@ -81,16 +90,23 @@ confidence flag. This is the core of the MVP.
 - ✅ Deployable app stack in `02_code/app/` — **lean serving DB + FastAPI +
   Caddy** (static frontend, `/api` proxy, `/tiles`), one `docker compose` that
   runs identically locally and on the VPS (see `tech-stack.md` §7).
-- ✅ Facilities served as **GeoJSON from FastAPI** (high+medium, 7,100 points),
-  rendered as small unclustered dots so the spatial distribution is readable
-  from the country view; click a facility → detail panel (record by ID).
-- ✅ **Community boundaries + filter**: all 1,471 громади drawn as borders; a
-  dropdown filters facilities to a community. Attribution is **spatial**
-  (`ST_Contains`), not a KOATUU↔KATOTTG crosswalk.
-- ✅ Modern light basemap (CARTO Positron), viewport locked to Ukraine.
+- ✅ Facilities served as **GeoJSON from FastAPI** (all 17,827 points with
+  coordinates, matched or not), rendered as small unclustered dots coloured by
+  match confidence (teal / vermillion / slate); click a facility → detail card
+  with the facility record + its internet-access payments.
+- ✅ **Filters & analytics UI** (BRDO design, applied 2026-07-17 from
+  `03_design_references/`): cascading область → громада → населений пункт +
+  галузь filters, search by facility and provider ЄДРПОУ, live counters
+  (facilities / payers by ЄДРПОУ / providers), top-20 providers bar chart
+  (click-to-filter), CSV export of the current selection. All filtering is
+  client-side over one FeatureCollection.
+- ✅ Modern light basemap (CARTO Positron), viewport fitted & locked to Ukraine.
 - ⬜ Static building PMTiles built (`scripts/build_building_tiles.sh`) but **not
   yet wired into the map** (still on the public basemap).
 - ⬜ Actual VPS deployment (stack is deploy-ready; not yet provisioned).
+- Note: the earlier community-borders overlay + spatial community filter was
+  **replaced** by attribute-based filters from the new catalog (`/communities`
+  endpoint still exists, unused by the frontend).
 
 **Exit criteria**
 - ✅ Map loads and renders smoothly for the hospital dataset (locally verified).

@@ -8,3 +8,8 @@ Thumbs.db
 
 # Raw & prepared source data — large (~9 GB), external, regenerable; never commit
 01_data_sources/
+
+# my local explorations with R
+02_code/00_R_code/
+
+03_design_references/
